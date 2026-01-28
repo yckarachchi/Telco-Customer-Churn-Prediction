@@ -1,0 +1,121 @@
+# --- PHASE 1: DATA LOADING & INSPECTION ---
+
+# 1. Load Libraries
+library(tidyverse)
+library(caret)
+library(corrplot)
+
+# 2. Load Data
+# We use read.csv because it's a standard CSV file
+df <- read.csv("data/churn_data.csv")
+
+# 3. First "Sanity Check"
+# Look at the first few rows
+print(head(df))
+
+# 4. Check the Structure
+# This tells us if numbers are being read as text (a common error)
+str(df)
+
+# 5. Check for Missing Values
+# In Churn data, "TotalCharges" often has missing values for new customers
+print("--- MISSING VALUES ---")
+print(sum(is.na(df)))
+
+
+# --- PHASE 2: DATA CLEANING & SPLITTING ---
+
+# 1. Clean the Data
+clean_df <- df %>%
+  select(-customerID) %>%              # Remove ID column (not useful for prediction)
+  na.omit() %>%                        # Remove the 11 rows with missing values
+  mutate(SeniorCitizen = as.factor(SeniorCitizen)) %>%  # Convert 0/1 to Factor
+  mutate_if(is.character, as.factor)   # Convert all text (Yes/No) to Factors
+
+# Double Check: Ensure "Churn" is a Factor now
+print("--- CHECKING STRUCTURE AFTER CLEANING ---")
+str(clean_df$Churn)
+
+# 2. Split into Training (75%) and Testing (25%)
+set.seed(123) # This ensures we get the same random split every time
+index <- createDataPartition(clean_df$Churn, p = 0.75, list = FALSE)
+
+train_data <- clean_df[index, ]
+test_data  <- clean_df[-index, ]
+
+print("--- DATA SPLIT SUMMARY ---")
+print(paste("Training Rows:", nrow(train_data)))
+print(paste("Testing Rows:", nrow(test_data)))
+
+
+# --- PHASE 3: EXPLORATORY DATA ANALYSIS (EDA) ---
+
+# Graph 1: Churn by Contract Type
+# This shows which contract is the "riskiest"
+p1 <- ggplot(clean_df, aes(x = Contract, fill = Churn)) +
+  geom_bar(position = "fill") +
+  labs(title = "Figure 1: Churn Rate by Contract Type", y = "Proportion") +
+  scale_fill_manual(values = c("gray", "red")) +
+  theme_minimal()
+
+print(p1)
+
+# Graph 2: Monthly Charges vs. Churn
+# Are people leaving because the bill is too high?
+p2 <- ggplot(clean_df, aes(x = Churn, y = MonthlyCharges, fill = Churn)) +
+  geom_boxplot() +
+  labs(title = "Figure 2: Do Higher Charges lead to Churn?", y = "Monthly Charges ($)") +
+  scale_fill_manual(values = c("gray", "red")) +
+  theme_minimal()
+
+print(p2)
+
+# Graph 3: Tenure Distribution
+# Do new customers leave faster than old ones?
+p3 <- ggplot(clean_df, aes(x = tenure, fill = Churn)) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Figure 3: Tenure Density (New vs Loyal Customers)", x = "Months with Company") +
+  scale_fill_manual(values = c("gray", "red")) +
+  theme_minimal()
+
+print(p3)
+
+
+
+# --- PHASE 4: MACHINE LEARNING (Random Forest) ---
+
+print("--- TRAINING THE MODEL (Please Wait...) ---")
+
+# 1. Set up "Cross-Validation"
+# This prevents the model from cheating by double-checking its work 5 times.
+ctrl <- trainControl(method = "cv", number = 5)
+
+# 2. Train the Random Forest Model
+# "Churn ~ ." means "Predict Churn using ALL other columns"
+rf_model <- train(Churn ~ ., 
+                  data = train_data, 
+                  method = "rf", 
+                  trControl = ctrl,
+                  ntree = 100) # Use 100 trees for speed
+
+print(rf_model)
+
+# 3. Make Predictions on the Test Set (The Final Exam)
+predictions <- predict(rf_model, test_data)
+
+# 4. The Scorecard (Confusion Matrix)
+# This compares the Prediction vs Reality
+conf_matrix <- confusionMatrix(predictions, test_data$Churn)
+
+print("--- FINAL ACCURACY SCORECARD ---")
+print(conf_matrix)
+
+
+
+# --- PHASE 5: FEATURE IMPORTANCE ---
+
+# 1. Ask the model: "Which variables mattered most?"
+importance <- varImp(rf_model)
+
+# 2. Visualize the Top 10 Drivers of Churn
+plot(importance, top = 10, main = "Top 10 Drivers of Customer Churn")
